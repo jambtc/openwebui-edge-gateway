@@ -1,0 +1,113 @@
+# OpenClaw OpenAI Proxy
+
+OpenAI-compatible HTTP proxy that lets Open WebUI talk to OpenClaw agents while
+preserving chat/session affinity. It exposes:
+
+- `/v1/models` – advertises your OpenClaw agents as OpenAI models and publishes a
+  pipeline filter that injects the Open WebUI `chat_id` into the OpenAI `user`
+  field.
+- `/v1/chat/completions` – forwards requests to the OpenClaw Gateway
+  (`gateway.http.endpoints.chatCompletions`).
+- `/<pipeline-id>/filter/(inlet|outlet)` – remote pipeline hooks consumed by Open
+  WebUI filters.
+
+## Features
+
+- Stable session routing: the bundled pipeline copies `__metadata__.chat_id`
+  into `user`, so the Gateway derives a deterministic session key per chat.
+- Explicit agent routing: every exposed model maps to an OpenClaw agent id
+  (`model=openclaw:<agentId>`).
+- YAML configuration + environment variable override for the gateway token.
+- Works with Open WebUI's *Connections → OpenAI Compatible* feature and the
+  Pipelines UI (filter type).
+
+## Project layout
+
+```
+openclaw-openai-proxy/
+├── openclaw_openai_proxy/
+│   ├── config.py          # Pydantic models for gateway/agent/pipeline config
+│   ├── gateway.py         # Async HTTP client for the OpenClaw Gateway
+│   ├── main.py            # Entry point used by `openclaw-openai-proxy` CLI
+│   ├── server.py          # FastAPI app + pipeline handlers
+│   └── settings.py        # Loads YAML config via OPENCLAW_PROXY_CONFIG
+├── config.example.yaml    # Sample configuration
+├── pyproject.toml         # Project metadata + dependencies
+└── README.md              # This file
+```
+
+## Configuration
+
+Create a `config.yaml` (or point `OPENCLAW_PROXY_CONFIG` to another path):
+
+```yaml
+gateway:
+  base_url: http://127.0.0.1:18789
+  token: "REPLACE_WITH_OPENCLAW_GATEWAY_TOKEN"
+
+agents:
+  - id: "openclaw:contabo"
+    name: "Contabo (OpenClaw)"
+    description: "Instruito con tono tecnico."
+    agent_id: "main"
+    tags: ["internal", "openclaw"]
+
+pipeline:
+  id: "openclaw-session-filter"
+  name: "OpenClaw session bridge"
+  description: "Propaga chat_id nel campo user per sessioni stabili."
+  pipelines: ["*"]
+  priority: 500
+```
+
+Environment variables:
+
+- `OPENCLAW_PROXY_CONFIG`: path to the YAML file (default: `config.yaml`).
+
+## Running locally
+
+```bash
+cd openclaw-openai-proxy
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+OPENCLAW_PROXY_CONFIG=config.yaml openclaw-openai-proxy
+```
+
+The service listens on `0.0.0.0:4010` by default.
+
+## Wiring it into Open WebUI
+
+1. **Connection** – add a new OpenAI-compatible connection that points to the
+   proxy (e.g. `http://HOST:4010`) and use any placeholder API key (the proxy
+   currently trusts the caller; network-level ACLs are recommended).
+2. **Models** – the `/v1/models` response will expose each configured agent as a
+   selectable model.
+3. **Pipeline filter** – in *Pipelines* choose the proxy connection, import the
+   `openclaw-session-filter`, and attach it to the models that should inherit
+   the stable session behaviour.
+
+## Deploying (systemd snippet)
+
+```ini
+[Unit]
+Description=OpenClaw OpenAI Proxy
+After=network.target
+
+[Service]
+Environment=OPENCLAW_PROXY_CONFIG=/etc/openclaw-openai-proxy.yaml
+WorkingDirectory=/opt/openclaw-openai-proxy
+ExecStart=/opt/openclaw-openai-proxy/.venv/bin/openclaw-openai-proxy
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Limitations
+
+- `/pipelines/upload` and `/pipelines/add` return HTTP 405 (not yet supported).
+- Only chat completions are proxied; embeddings/images are out of scope.
+- The proxy trusts inbound requests; place it behind a reverse proxy or private
+  network segment if you need authentication.
+
+Contributions via pull requests/issues are welcome.

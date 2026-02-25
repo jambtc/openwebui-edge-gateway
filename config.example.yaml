@@ -1,0 +1,19 @@
+gateway:
+  base_url: http://127.0.0.1:18789
+  token: "REPLACE_WITH_OPENCLAW_GATEWAY_TOKEN"
+
+agents:
+  - id: "openclaw:contabo"
+    name: "Contabo (OpenClaw)"
+    description: "Assistente con tono tecnico."
+    agent_id: "main"
+    tags:
+      - openclaw
+      - internal
+
+pipeline:
+  id: "openclaw-session-filter"
+  name: "OpenClaw session bridge"
+  description: "Propaga chat_id -> user per sessioni stabili"
+  pipelines: ["*"]
+  priority: 500

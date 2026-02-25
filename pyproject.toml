@@ -1,0 +1,25 @@
+[project]
+name = "openclaw-openai-proxy"
+version = "0.1.0"
+description = "OpenAI-compatible proxy that bridges Open WebUI to OpenClaw agents with pipeline filters"
+authors = [
+    { name = "Sergio Fiorenza", email = "sergio.fiorenza@theia-innovation.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.109",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.26",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.3",
+    "mypy>=1.8"
+]
+
+[project.scripts]
+openclaw-openai-proxy = "openclaw_openai_proxy.main:run"
