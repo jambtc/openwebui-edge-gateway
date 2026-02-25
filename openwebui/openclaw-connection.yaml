@@ -1,0 +1,16 @@
+version: 1
+connections:
+  - name: OpenClaw Proxy
+    type: openai-compatible
+    base_url: http://HOST_OR_IP:4010
+    api_key: sk-local-proxy
+    description: "Proxy che inoltra le richieste al Gateway OpenClaw"
+    models:
+      - openclaw:contabo
+pipelines:
+  - id: openclaw-session-filter
+    connection: OpenClaw Proxy
+    targets: ["openclaw:contabo"]
+    notes: |
+      Questo filtro imposta automaticamente il campo `user` usando `__metadata__.chat_id`
+      per mantenere le sessioni di OpenClaw allineate con le chat di Open WebUI.
