@@ -1,0 +1,32 @@
+gateway:
+  base_url: http://127.0.0.1:18789/
+  token: 1e669055a6bbdf667fa63dbeb8f1d004a1f085abc585c251
+agents:
+- id: BoxedAI:assistant
+  name: BoxedAI Assistant
+  description: Assistente principale tonale tecnico
+  agent_id: main
+  tags:
+  - openclaw
+  - internal
+- id: BoxedAI:coder
+  name: BoxedAI Coder
+  description: Agente per coding
+  agent_id: coder
+  tags:
+  - openclaw
+  - coder
+- id: BoxedAI:writer
+  name: BoxedAI Writer
+  description: Agente per scrittura
+  agent_id: writer
+  tags:
+  - openclaw
+  - writer
+pipeline:
+  id: openclaw-session-filter
+  name: OpenClaw session bridge
+  description: Propaga chat_id in user per sessioni stabili
+  pipelines:
+  - '*'
+  priority: 500
