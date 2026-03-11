@@ -1,0 +1,309 @@
+{
+  "source_file": "/home/sergio/Scaricati/swagger-backend.json",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenClaw BFF",
+    "description": "Backend for Frontend (BFF) per OpenClaw. Espone una Public REST API (/api/v1) per un frontend stile ChatGPT, più endpoint OpenAI-compatible (/v1/*) per integrazioni (es. OpenWebUI).",
+    "version": "0.1.0"
+  },
+  "endpoints": {
+    "upload_multipart": {
+      "path": "/api/v1/uploads",
+      "method": "post",
+      "request_content_type": "multipart/form-data",
+      "request_schema_ref": "#/components/schemas/Body_upload_file_multipart_api_v1_uploads_post",
+      "response_200_schema_ref": "#/components/schemas/UploadCreateResponse"
+    },
+    "inject_conversation": {
+      "path": "/api/v1/conversations/{conversation_id}/inject",
+      "method": "post",
+      "request_content_type": "application/json",
+      "request_schema_ref": "#/components/schemas/InjectRequest",
+      "response_200_schema_ref": "#/components/schemas/InjectResponse"
+    }
+  },
+  "schemas": {
+    "Body_upload_file_multipart_api_v1_uploads_post": {
+      "properties": {
+        "file": {
+          "type": "string",
+          "contentMediaType": "application/octet-stream",
+          "title": "File",
+          "description": "File da caricare"
+        },
+        "metadata_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Metadata Json",
+          "description": "Metadati JSON (stringa)"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tags",
+          "description": "Tag separati da virgola"
+        },
+        "include_presigned_get": {
+          "type": "boolean",
+          "title": "Include Presigned Get",
+          "description": "Se true include presigned_get_url nella risposta",
+          "default": false
+        },
+        "presigned_get_expires_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Presigned Get Expires Seconds",
+          "description": "TTL presigned GET (secondi)"
+        }
+      },
+      "type": "object",
+      "required": [
+        "file"
+      ],
+      "title": "Body_upload_file_multipart_api_v1_uploads_post"
+    },
+    "UploadCreateResponse": {
+      "properties": {
+        "upload_id": {
+          "type": "string",
+          "format": "uuid",
+          "title": "Upload Id",
+          "description": "ID del file"
+        },
+        "bucket": {
+          "type": "string",
+          "title": "Bucket"
+        },
+        "object_key": {
+          "type": "string",
+          "title": "Object Key"
+        },
+        "filename": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Filename"
+        },
+        "mime_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mime Type"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Size Bytes"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sha256"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Metadata"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tags"
+        },
+        "status": {
+          "type": "string",
+          "title": "Status"
+        },
+        "is_deleted": {
+          "type": "boolean",
+          "title": "Is Deleted"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Created At"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Updated At"
+        },
+        "download_url": {
+          "type": "string",
+          "title": "Download Url",
+          "description": "Endpoint BFF per scaricare lo stesso oggetto"
+        },
+        "public_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Public Url",
+          "description": "URL diretta (stabile) verso MinIO (se raggiungibile)"
+        },
+        "presigned_get_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Presigned Get Url",
+          "description": "URL presigned GET (temporanea)"
+        },
+        "presigned_get_expires_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Presigned Get Expires At",
+          "description": "Scadenza della presigned_get_url"
+        }
+      },
+      "type": "object",
+      "required": [
+        "upload_id",
+        "bucket",
+        "object_key",
+        "status",
+        "is_deleted",
+        "created_at",
+        "updated_at",
+        "download_url"
+      ],
+      "title": "UploadCreateResponse",
+      "description": "Risposta per create upload (caricamento già completato sul server)."
+    },
+    "InjectRequest": {
+      "properties": {
+        "content": {
+          "type": "string",
+          "title": "Content",
+          "description": "Messaggio da iniettare nel thread"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Label",
+          "description": "Etichetta opzionale"
+        }
+      },
+      "type": "object",
+      "required": [
+        "content"
+      ],
+      "title": "InjectRequest"
+    },
+    "InjectResponse": {
+      "properties": {
+        "injected": {
+          "type": "boolean",
+          "title": "Injected"
+        },
+        "openclaw_result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Openclaw Result"
+        }
+      },
+      "type": "object",
+      "required": [
+        "injected"
+      ],
+      "title": "InjectResponse"
+    },
+    "HTTPValidationError": {
+      "properties": {
+        "detail": {
+          "items": {
+            "$ref": "#/components/schemas/ValidationError"
+          },
+          "type": "array",
+          "title": "Detail"
+        }
+      },
+      "type": "object",
+      "title": "HTTPValidationError"
+    }
+  }
+}
