@@ -13,14 +13,12 @@ from fastapi.responses import JSONResponse
 
 from .backend import BackendClient
 from .config import AgentConfig
-from .gateway import GatewayClient
 from .settings import build_runtime_settings
 
 log = logging.getLogger(__name__)
 
 settings = build_runtime_settings()
 config = settings.app_config
-client = GatewayClient(config)
 backend_client = BackendClient(config)
 
 app = FastAPI(title="OpenClaw OpenAI Proxy", version="0.1.0")
@@ -122,7 +120,6 @@ def _session_key(user_id: str, chat_id: str) -> str:
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    await client.close()
     await backend_client.close()
 
 
@@ -150,15 +147,24 @@ async def list_models_alias() -> Dict[str, Any]:
     return await list_models()
 
 
-async def _forward_chat_completion(payload: Dict[str, Any]):
+def _resolve_agent(model_id: str) -> AgentConfig:
+    for agent in config.agents:
+        if agent.id == model_id:
+            return agent
+    raise ValueError(f"Unknown model id '{model_id}'")
+
+
+async def _forward_chat_completion(
+    payload: Dict[str, Any], headers: dict[str, str]
+):
     model_id = payload.get("model")
     if not model_id:
         raise HTTPException(
             status_code=400, detail="Missing 'model' in payload")
 
     try:
-        agent = client.resolve_agent(model_id)
-    except httpx.HTTPError as exc:
+        agent = _resolve_agent(model_id)
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     payload["model"] = f"openclaw:{agent.agent_id}"
@@ -166,21 +172,39 @@ async def _forward_chat_completion(payload: Dict[str, Any]):
     # Force non-streaming
     payload["stream"] = False
 
-    result = await client.chat_completions(payload, False)
-    assert isinstance(result, httpx.Response)
-    return JSONResponse(content=result.json())
+    try:
+        be_response = await backend_client.post_json(
+            path="/v1/chat/completions",
+            payload=payload,
+            headers=headers,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "Failed forwarding completion to BE", "error": str(exc)},
+        ) from exc
+
+    try:
+        be_payload = be_response.json()
+    except Exception:
+        be_payload = {"raw_response": be_response.text}
+
+    return JSONResponse(status_code=be_response.status_code, content=be_payload)
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     payload = await request.json()
     body = _get_body(payload)
+    headers = _bridge_headers_from_request(request)
 
     # Debug: remove if noisy
     print(
-        f"proxy→gateway model={body.get('model')} user={(body.get('user') or '')[:12]}", flush=True)
+        f"proxy→be chat.completions model={body.get('model')} user={(body.get('user') or '')[:12]}",
+        flush=True,
+    )
 
-    return await _forward_chat_completion(body)
+    return await _forward_chat_completion(body, headers=headers)
 
 
 @app.post("/chat/completions")

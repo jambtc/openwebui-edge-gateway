@@ -12,6 +12,7 @@ Il comportamento target e:
 Oggi il `proxy` e gia il punto di ingresso OpenAI-compatible per BoxedAI, ma il flusso non e ancora completo lato `be` soprattutto per la gestione documenti/file.
 
 In particolare:
+
 - le richieste chat/completions devono essere instradate verso `be`
 - le richieste legate ai documenti devono passare nello stesso flow (oggi gap operativo)
 - la coerenza sessione chat lato OpenClaw e gia coperta in BoxedAI tramite Filter Function `function/openclaw_session_bridge.py`
@@ -19,11 +20,13 @@ In particolare:
 ## Proposta
 
 Portare il `proxy` a essere il gateway unico verso `be` per:
+
 - completions/chat
 - upload/document handling
 - eventuali endpoint compatibili necessari a BoxedAI
 
 Linee guida:
+
 - mantenere compatibilita OpenAI lato BoxedAI
 - centralizzare nel proxy routing, normalizzazione payload e session affinity
 - delegare a `be` la logica applicativa (messaggi, storage documenti, integrazione OpenClaw)
@@ -108,3 +111,9 @@ Linee guida:
   - `status=uploaded`
 - Verificato download file dal BE con endpoint `/api/v1/uploads/{upload_id}/download`.
 - Step successivo aperto: inject automatico contesto documento su conversazione (`BIP-003`, fase 2).
+
+### 2026-03-11 - Routing completions spostato su BE
+
+- Aggiornato il proxy: `POST /v1/chat/completions` (e alias `/chat/completions`) ora inoltra a `be` (`/v1/chat/completions`) invece di chiamare `opc` direttamente.
+- Mantenuto mapping modello configurato nel proxy (`model -> openclaw:<agent_id>`) prima dell'inoltro.
+- Inoltro header auth/debug verso BE (`Authorization`, `X-Debug-User`) anche per le completions.

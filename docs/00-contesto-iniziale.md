@@ -36,6 +36,7 @@ Data: 2026-03-11
 - `boxedai` parla protocollo OpenAI-compatible verso `proxy`.
 - `boxedai` ha gia attiva la Filter Function `function/openclaw_session_bridge.py` che imposta `body.user = sha256(user_id:chat_id)` per mantenere coerente la sessione verso `opc`.
 - `proxy` espone endpoint OpenAI (models/chat-completions), applica compatibilita e normalizzazione payload.
+- `proxy` instrada le chiamate operative (chat + upload/documenti) verso `be`.
 - `proxy` gestisce affinita di sessione per chat (chiave deterministica in `user` quando disponibile metadata chat).
 - `be` orchestra logica applicativa e integrazione con `openclaw`.
 - `openclaw` esegue agenti/workflow e restituisce output lungo la stessa catena in verso inverso.
@@ -45,6 +46,7 @@ Data: 2026-03-11
 - Endpoint principali disponibili:
   - `GET /v1/models` (alias `/models`)
   - `POST /v1/chat/completions` (alias `/chat/completions`)
+  - `POST /v1/uploads/bridge` (alias `/uploads/bridge`)
   - endpoint pipeline/filter/valves anche con alias `/v1/...`.
 - Mapping modelli:
   - `model` in ingresso viene risolto su config agenti e tradotto in formato OpenClaw (`openclaw:<agent_id>`).
@@ -52,9 +54,10 @@ Data: 2026-03-11
   - in `inlet` pipeline, se c'e `chat_id`, imposta `user = sha256(user_id:chat_id)` (`enforce_user=true`).
 - Config runtime:
   - file YAML via `OPENCLAW_PROXY_CONFIG` (default `config.yaml`)
+  - split config `gateway` (opc) e `backend` (be)
   - token gateway via env expansion `${OPENCLAW_GATEWAY_TOKEN}`.
 - Completions:
-  - forwarding attuale non-streaming (`stream=false`).
+  - forwarding attuale non-streaming (`stream=false`) verso `be` (`/v1/chat/completions`).
 
 ## Porte esposte (tutti i servizi del contesto)
 

@@ -1,23 +1,25 @@
 # OpenClaw OpenAI Proxy
 
-OpenAI-compatible HTTP proxy that lets Open WebUI talk to OpenClaw agents while
-preserving chat/session affinity. It exposes:
+OpenAI-compatible HTTP proxy that lets Open WebUI talk to OpenClaw through the
+BFF backend (`be`) while preserving chat/session affinity. It exposes:
 
 - `/v1/models` – advertises your OpenClaw agents as OpenAI models and publishes a
   pipeline filter that injects the Open WebUI `chat_id` into the OpenAI `user`
   field.
-- `/v1/chat/completions` – forwards requests to the OpenClaw Gateway
-  (`gateway.http.endpoints.chatCompletions`).
+- `/v1/chat/completions` – forwards requests to `be` (`/v1/chat/completions`).
+- `/v1/uploads/bridge` – forwards multipart upload requests to `be`
+  (`/api/v1/uploads`) and returns the BE payload plus a bridge correlation id.
 - `/<pipeline-id>/filter/(inlet|outlet)` – remote pipeline hooks consumed by Open
   WebUI filters.
 
 ## Features
 
 - Stable session routing: the bundled pipeline copies `__metadata__.chat_id`
-  into `user`, so the Gateway derives a deterministic session key per chat.
+  into `user`, so OpenClaw derives a deterministic session key per chat.
 - Explicit agent routing: every exposed model maps to an OpenClaw agent id
   (`model=openclaw:<agentId>`).
-- YAML configuration + environment variable override for the gateway token.
+- Split YAML configuration: `backend` (BE) and `gateway` (OPC metadata/future
+  direct calls).
 - Works with Open WebUI's *Connections → OpenAI Compatible* feature and the
   Pipelines UI (filter type).
 
@@ -27,6 +29,7 @@ preserving chat/session affinity. It exposes:
 openclaw-openai-proxy/
 ├── openclaw_openai_proxy/
 │   ├── config.py          # Pydantic models for gateway/agent/pipeline config
+│   ├── backend.py         # HTTP client for BE calls
 │   ├── gateway.py         # Async HTTP client for the OpenClaw Gateway
 │   ├── main.py            # Entry point used by `openclaw-openai-proxy` CLI
 │   ├── server.py          # FastAPI app + pipeline handlers
@@ -43,7 +46,11 @@ Create a `config.yaml` (or point `OPENCLAW_PROXY_CONFIG` to another path):
 ```yaml
 gateway:
   base_url: http://127.0.0.1:18789
-  token: "REPLACE_WITH_OPENCLAW_GATEWAY_TOKEN"
+  token: "${OPENCLAW_GATEWAY_TOKEN}"  # optional if proxy does not call gateway directly
+
+backend:
+  base_url: http://127.0.0.1:8000
+  timeout_seconds: 120
 
 agents:
   - id: "openclaw:contabo"
@@ -60,9 +67,10 @@ pipeline:
   priority: 500
 ```
 
-Environment variables:
+Environment variables (optional):
 
 - `OPENCLAW_PROXY_CONFIG`: path to the YAML file (default: `config.yaml`).
+- `OPENCLAW_GATEWAY_TOKEN`: expanded when referenced as `${OPENCLAW_GATEWAY_TOKEN}`.
 
 ## Running locally
 
@@ -106,7 +114,7 @@ WantedBy=multi-user.target
 ## Limitations
 
 - `/pipelines/upload` and `/pipelines/add` return HTTP 405 (not yet supported).
-- Only chat completions are proxied; embeddings/images are out of scope.
+- `chat/completions` and `uploads/bridge` are proxied; embeddings/images are out of scope.
 - The proxy trusts inbound requests; place it behind a reverse proxy or private
   network segment if you need authentication.
 
