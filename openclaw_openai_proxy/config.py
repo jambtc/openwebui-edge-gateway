@@ -57,11 +57,38 @@ class GatewayConfig(BaseModel):
     base_url: AnyHttpUrl = Field(
         default="http://127.0.0.1:18789", description="OpenClaw Gateway URL"
     )
-    token: str = Field(..., description="Gateway bearer token")
+    token: str = Field(
+        default="",
+        description="Gateway bearer token (optional unless direct gateway calls are enabled)",
+    )
+
+
+class BackendConfig(BaseModel):
+    base_url: AnyHttpUrl = Field(
+        default="http://127.0.0.1:8000", description="OpenClaw BFF URL"
+    )
+    timeout_seconds: float = Field(
+        default=120, gt=0, le=600, description="Timeout for proxy->BFF calls"
+    )
+
+
+class EdgeConfig(BaseModel):
+    enabled: bool = Field(
+        default=False,
+        description="Enable catch-all passthrough to Open WebUI backend for unmatched routes",
+    )
+    box_base_url: Optional[AnyHttpUrl] = Field(
+        default=None, description="Open WebUI base URL used by edge passthrough"
+    )
+    timeout_seconds: float = Field(
+        default=120, gt=0, le=600, description="Timeout for proxy->Open WebUI passthrough"
+    )
 
 
 class AppConfig(BaseModel):
-    gateway: GatewayConfig
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    backend: BackendConfig = Field(default_factory=BackendConfig)
+    edge: EdgeConfig = Field(default_factory=EdgeConfig)
     agents: List[AgentConfig]
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
 
@@ -96,5 +123,17 @@ def load_config(config_path: Path) -> AppConfig:
     if "token" in gateway and isinstance(gateway["token"], str):
         gateway["token"] = _expand_env(gateway["token"])
     data["gateway"] = gateway
+
+    edge = data.get("edge", {})
+    if "box_base_url" in edge and isinstance(edge["box_base_url"], str):
+        edge["box_base_url"] = _expand_env(edge["box_base_url"])
+    elif "box_base_url" not in edge:
+        # Allow .env-driven edge routing without forcing config.yaml edits.
+        env_box_base_url = os.environ.get("BOX_BASE_URL") or os.environ.get(
+            "OPENWEBUI_BOX_BASE_URL"
+        )
+        if env_box_base_url:
+            edge["box_base_url"] = env_box_base_url
+    data["edge"] = edge
 
     return AppConfig.model_validate(data)

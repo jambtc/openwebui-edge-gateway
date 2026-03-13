@@ -1,84 +1,76 @@
 # Contesto Iniziale (proxy / boxedai / be / openclaw)
 
-Data: 2026-03-11
+Data aggiornamento: 2026-03-13
 
 ## Riferimenti repository
 
-- `proxy`: `/var/www/openclaw-openai-proxy`
-- `boxedai`: `/var/www/open-webui`
-- `be`: `/var/www/openclaw-based-backend` (path richiesto: `/var/www/openclaw-based-backed`)
-- `openclaw` (repo): `https://github.com/openclaw/openclaw`
+- `proxy` (gateway): `/var/www/openclaw-openai-proxy`
+- `boxedai` (Open WebUI): `/var/www/open-webui`
+- `be`: `/var/www/openclaw-based-backend` (path richiesto nel brief: `/var/www/openclaw-based-backed`)
+- `openclaw` (opc): `https://github.com/openclaw/openclaw`
 
 ## Naming condiviso
 
-- `proxy` = OpenAI-compatible bridge tra UI e backend applicativo
-- `boxedai` = interfaccia Open WebUI
-- `be` = openclaw-based-backend
-- `openclaw` = runtime/agent platform a valle del backend
-- `opc` = alias rapido per `openclaw`
+- `gateway` = `proxy` evoluto a edge gateway (container: `opc-proxy`)
+- `boxedai` / `box` = Open WebUI (container: `open-webui`)
+- `be` = openclaw-based-backend (BFF + RAG documentale)
+- `openclaw` / `opc` = runtime agent a valle del backend
 
-## Flow di funzionamento
+## Flusso logico di riferimento
 
-- forward: `boxedai -> proxy -> be -> openclaw`
-- reverse: `openclaw -> be -> proxy -> boxedai`
+- `boxedai -> gateway -> be -> openclaw` (e ritorno)
+- vincolo documentale: upload file deve passare da `gateway -> be`, senza persistenza finale nel dominio Box
 
-## BE: componenti e avvio
+## Stato implementazione (validato)
 
-- In `be` sono presenti i servizi infrastrutturali:
-  - Postgres (persistenza dati conversazioni/messaggi/sessioni).
-  - Keycloak (auth/OIDC per integrazione con boxedai).
-  - MinIO (object storage file upload/download).
-- Lo script `scripts/dev_run.sh` avvia il backend FastAPI usando variabili da `.env` (tipicamente con venv attivo) ed espone `0.0.0.0:${BFF_PORT:-8000}`.
-- OpenClaw non e nel compose infra di `be`: viene raggiunto come servizio esterno.
+- `POST /api/v1/files` intercettato dal gateway e inoltrato a `be /api/v1/uploads`
+- risposta upload BE adattata a shape Box-compatible
+- `GET /api/v1/files/{id}/process/status?stream=true` servita dal gateway
+- intercetto chat Box completato su:
+  - `POST /api/v1/chats/new`
+  - `POST|PUT|PATCH /api/v1/chats/{chat_id}`
+  - `POST /api/chat/completions`
+- routing OpenAI compatibile attivo verso BE:
+  - `/v1/chat/completions`
+  - `/v1/completions`
+  - `/v1/responses` (con fallback su chat/completions)
+- edge pass-through attivo per route non intercettate (gateway davanti a Box)
+- reinject provider-side completato: il gateway conserva il contesto documento e lo riapplica sulla completion reale emessa da Box verso `/v1/chat/completions`
 
-## Contratto tra componenti
+## Porte e servizi (topologia locale test)
 
-- `boxedai` parla protocollo OpenAI-compatible verso `proxy`.
-- `boxedai` ha gia attiva la Filter Function `function/openclaw_session_bridge.py` che imposta `body.user = sha256(user_id:chat_id)` per mantenere coerente la sessione verso `opc`.
-- `proxy` espone endpoint OpenAI (models/chat-completions), applica compatibilita e normalizzazione payload.
-- `proxy` gestisce affinita di sessione per chat (chiave deterministica in `user` quando disponibile metadata chat).
-- `be` orchestra logica applicativa e integrazione con `openclaw`.
-- `openclaw` esegue agenti/workflow e restituisce output lungo la stessa catena in verso inverso.
+- `opc-proxy` (gateway):
+  - `3001 -> 4010` (entrypoint FE/API)
+  - `4010 -> 4010` (entrypoint provider OpenAI-compatible)
+- `open-webui` (boxedai backend):
+  - `3002 -> 8080` (upstream del gateway)
+- `mvp-qdrant`:
+  - `6333 -> 6333`
+- `ollama`:
+  - nessuna porta pubblicata nel compose locale Box
+  - servizio interno Docker usato da Box su `11434`
+- `be` remoto:
+  - `https://be-boxedai-contabo.theia-innovation.com` (443)
+- `openclaw` runtime (a valle BE):
+  - `18789` / `18789/ws` (infrastruttura runtime)
+- `postgres` BE infra:
+  - `5432 -> 5432`
+- `minio` BE infra:
+  - `9000 -> 9000` (API/S3)
+  - `9001 -> 9001` (console)
+- `keycloak` BE infra:
+  - `8080 -> 8080`
+- `be` applicativo:
+  - `8000` esposto dal processo FastAPI avviato con `scripts/dev_run.sh`
 
-## Stato tecnico corrente del proxy
+Nota: in locale il browser usa `http://localhost:3001` (gateway). Il gateway inoltra a Box su `BOX_BASE_URL` (attualmente `http://host.docker.internal:3002`).
 
-- Endpoint principali disponibili:
-  - `GET /v1/models` (alias `/models`)
-  - `POST /v1/chat/completions` (alias `/chat/completions`)
-  - endpoint pipeline/filter/valves anche con alias `/v1/...`.
-- Mapping modelli:
-  - `model` in ingresso viene risolto su config agenti e tradotto in formato OpenClaw (`openclaw:<agent_id>`).
-- Session affinity:
-  - in `inlet` pipeline, se c'e `chat_id`, imposta `user = sha256(user_id:chat_id)` (`enforce_user=true`).
-- Config runtime:
-  - file YAML via `OPENCLAW_PROXY_CONFIG` (default `config.yaml`)
-  - token gateway via env expansion `${OPENCLAW_GATEWAY_TOKEN}`.
-- Completions:
-  - forwarding attuale non-streaming (`stream=false`).
+## Invarianti tecniche
 
-## Porte esposte (tutti i servizi del contesto)
-
-- `boxedai` (`/var/www/open-webui`):
-  - `127.0.0.1:3001 -> container 8080` (Open WebUI)
-  - `6333 -> 6333` (Qdrant)
-- `proxy` (`/var/www/openclaw-openai-proxy`):
-  - `4010 -> 4010` (OpenClaw OpenAI Proxy)
-- `be` API (`/var/www/openclaw-based-backend`):
-  - `8000` (uvicorn via `scripts/dev_run.sh`, default `BFF_PORT`)
-- `be` infra (`docker-compose.infra.yml`):
-  - `5432 -> 5432` (Postgres)
-  - `9000 -> 9000` (MinIO API S3)
-  - `9001 -> 9001` (MinIO Console)
-  - `8080 -> 8080` (Keycloak)
-- `openclaw` (servizio esterno al compose di `be`):
-  - `18789` (HTTP Gateway)
-  - `18789/ws` (WebSocket RPC)
-- dipendenza runtime boxedai:
-  - `11434` (Ollama atteso da Open WebUI; non esposto nel compose corrente di `boxedai`)
-
-## Invarianti operative
-
-- mantenere compatibilita OpenAI lato `boxedai`.
-- mantenere sessione stabile per chat lungo la catena.
-- evitare loop architetturali tra componenti upstream/downstream.
-- centralizzare nel `proxy` adattamento protocollo e regole di routing/mapping.
+- nessuna regressione UX lato Box su chat/upload
+- mapping file conservato nel gateway (`meta.data.be_upload`)
+- log applicativi con evidenza upload BE e shape di ritorno Box
+- lookup `GET /api/v1/uploads/{upload_id}/links` gia usato dal gateway prima della completion
+- issue residua non nel perimetro gateway:
+  - `be` restituisce link documento con host locale MinIO (`localhost:9000`) oppure `download_url` non immediatamente consumabile da OPC
+  - il gateway compensa costruendo un URL BE assoluto, ma la raggiungibilita reale del documento va corretta lato `be`/storage exposure

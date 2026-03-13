@@ -1,0 +1,48 @@
+// EDGE upload -> BE status=200 user=ae87664c-199d-44d7-b64b-bdb407276c71 be_json=
+{
+    "upload_id": "85d22ed9-c5e3-4815-a0dc-b7ee421fa833",
+    "bucket": "openclaw-bff",
+    "object_key": "ae87664c-199d-44d7-b64b-bdb407276c71/85d22ed9-c5e3-4815-a0dc-b7ee421fa833/powerskid.pdf",
+    "filename": "powerskid.pdf",
+    "mime_type": "application/pdf",
+    "size_bytes": 24462,
+    "sha256": "b9e806c0c09dccfb58b62b19daebfdf44ae749763a544aae66f5bdf85a238a44",
+    "metadata": null,
+    "tags": null,
+    "status": "uploaded",
+    "is_deleted": false,
+    "created_at": "2026-03-13T10:53:20.664741Z",
+    "updated_at": "2026-03-13T10:53:20.664745Z",
+    "download_url": "/api/v1/uploads/85d22ed9-c5e3-4815-a0dc-b7ee421fa833/download",
+    "public_url": "http://localhost:9000/openclaw-bff/ae87664c-199d-44d7-b64b-bdb407276c71/85d22ed9-c5e3-4815-a0dc-b7ee421fa833/powerskid.pdf",
+    "presigned_get_url": null,
+    "presigned_get_expires_at": null
+}
+// EDGE upload -> Box shape json=
+{
+    "status": true,
+    "id": "85d22ed9-c5e3-4815-a0dc-b7ee421fa833",
+    "user_id": "ae87664c-199d-44d7-b64b-bdb407276c71",
+    "hash": "b9e806c0c09dccfb58b62b19daebfdf44ae749763a544aae66f5bdf85a238a44",
+    "filename": "powerskid.pdf",
+    "data": {
+        "status": "pending"
+    },
+    "meta": {
+        "name": "powerskid.pdf",
+        "content_type": "application/pdf",
+        "size": 24462,
+        "data": {
+            "be_upload": {
+                "upload_id": "85d22ed9-c5e3-4815-a0dc-b7ee421fa833",
+                "bucket": "openclaw-bff",
+                "object_key": "ae87664c-199d-44d7-b64b-bdb407276c71/85d22ed9-c5e3-4815-a0dc-b7ee421fa833/powerskid.pdf",
+                "download_url": "/api/v1/uploads/85d22ed9-c5e3-4815-a0dc-b7ee421fa833/download",
+                "public_url": "http://localhost:9000/openclaw-bff/ae87664c-199d-44d7-b64b-bdb407276c71/85d22ed9-c5e3-4815-a0dc-b7ee421fa833/powerskid.pdf",
+                "presigned_get_url": null
+            }
+        }
+    },
+    "created_at": 1773399200,
+    "updated_at": 1773399200
+}
