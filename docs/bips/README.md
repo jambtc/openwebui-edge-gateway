@@ -16,10 +16,11 @@ Legenda stato: `📋 Proposta` - `🔄 In Esecuzione` - `✅ Completata` - `🚫
 | BIP | Titolo | Categoria | Priorita | Stato |
 | --- | ------ | --------- | -------- | ----- |
 | [BIP-001](BIP-001-proxy-full-routing-be.md) | Proxy full-routing verso BE (completions + documenti) | Architettura / Integrazione | Alta | 🔄 In Esecuzione |
-| [BIP-002](BIP-002-box-upload-intercept.md) | Box upload intercept (`/api/v1/files`) verso proxy | Integrazione Box / Proxy | Alta | 🔄 In Esecuzione |
+| [BIP-002](BIP-002-box-upload-intercept.md) | Box upload intercept (`/api/v1/files`) verso proxy | Integrazione Box / Proxy | Alta | ✅ Completata |
 | [BIP-003](BIP-003-proxy-upload-bridge-be-opc.md) | Proxy upload API + bridge BE + context inject OPC | Integrazione Proxy / BE / OPC | Alta | 🚫 Sospesa |
 | [BIP-004](BIP-004-box-file-metadata-correlation-without-box-code.md) | Correlazione file/chat con lookup upload prima di completions | Integrazione Box Function / Metadata | Alta | 🔄 In Esecuzione |
 | [BIP-005](BIP-005-openwebui-edge-gateway-scope.md) | Pivot architetturale a OpenWebUI Edge Gateway | Architettura / Scope | Alta | 🔄 In Esecuzione |
+| [BIP-006](BIP-006-edge-gateway-phase1-implementation-plan.md) | Piano tecnico Fase 1 Edge Gateway (upload intercept) | Implementazione | Alta | 🔄 In Esecuzione |
 
 ---
 

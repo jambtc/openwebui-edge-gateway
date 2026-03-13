@@ -38,6 +38,22 @@ Conseguenza:
 - Incluso: dichiarazione prerequisito intercetto route upload (`/api/v1/files*`) fuori dalla Function.
 - Escluso: inject su `opc` (al momento non previsto).
 
+## Stato aggiornato (2026-03-13)
+
+Prerequisito completato:
+
+- intercetto edge `POST /api/v1/files` attivo e validato
+- risposta upload gateway include `meta.data.be_upload` con:
+  - `upload_id`
+  - `object_key`
+  - `download_url`
+  - `public_url`
+
+Conseguenza operativa:
+
+- prima di inoltrare completions, `GET /api/v1/uploads` resta step obbligatorio (source of truth)
+- `meta.data.be_upload` viene usato per correlare/filtrare la ricerca (chiavi upload/file/user)
+
 ## Identificativi target
 
 I campi da correlare restano:

@@ -6,6 +6,7 @@ services:
     container_name: opc-proxy
     restart: unless-stopped
     ports:
+      - "3001:4010"
       - "4010:4010"
     env_file:
       - .env

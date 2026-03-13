@@ -31,6 +31,11 @@ con due opzioni:
   - `/v1/responses` (con fallback su chat/completions se upstream non disponibile)
 - Bridge upload BE:
   - `/v1/uploads/bridge` (alias `/uploads/bridge`) -> `be /api/v1/uploads`
+- Edge upload compatibility (POC Fase 1):
+  - `POST /api/v1/files`
+  - `GET /api/v1/files/{id}`
+  - `GET /api/v1/files/{id}/process/status`
+  - `GET /api/v1/files/{id}/content`
 - Session bridge function lato Box (`body.user = sha256(user_id:chat_id)`).
 
 ## Nuovo scope (Edge Gateway)
@@ -50,6 +55,13 @@ Dettaglio operativo e decisioni nei BIP sotto `docs/bips`.
 - `BIP-003`: upload bridge + inject (attualmente sospesa parte inject)
 - `BIP-004`: correlazione file/chat + lookup upload pre-completion
 - `BIP-005`: scope ufficiale Edge Gateway
+- `BIP-006`: implementazione tecnica Fase 1 edge (upload + pass-through)
+
+## Documentazione operativa
+
+- Contesto operativo: `docs/00-contesto-iniziale.md`
+- Data flow e diagrammi (container + porte): `docs/documentazione/01-flusso-dati-edge-gateway.md`
+- BIP index: `docs/bips/README.md`
 
 ## Avvio locale
 
@@ -61,3 +73,25 @@ OPENCLAW_PROXY_CONFIG=config.yaml openclaw-openai-proxy
 ```
 
 Servizio di default: `0.0.0.0:4010`.
+
+## Edge passthrough verso Box
+
+Per usare il gateway come reverse proxy edge davanti a OpenWebUI (Box),
+abilita in `config.yaml`:
+
+```yaml
+edge:
+  enabled: true
+  box_base_url: "${BOX_BASE_URL}"
+  timeout_seconds: 120
+```
+
+Con questa opzione, tutte le route non gestite localmente dal gateway
+vengono inoltrate a Box. Le route intercettate localmente (es. `/api/v1/files*`
+e OpenAI-compatible) restano sotto controllo gateway.
+
+In `.env` puoi quindi variare facilmente la porta locale Box, ad esempio:
+
+```bash
+BOX_BASE_URL=http://host.docker.internal:3002
+```
