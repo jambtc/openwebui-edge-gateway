@@ -1,6 +1,6 @@
 # BIP-006 - Edge Gateway Fase 1: piano tecnico implementazione
 
-> Stato attuale: `📋 Proposta` - avvio 2026-03-13
+> Stato attuale: `🔄 In Esecuzione` - avvio 2026-03-13
 > Owner: `proxy` team
 
 ## Obiettivo Fase 1
@@ -109,3 +109,18 @@ Uso:
 - store correlazione file
 - test e checklist regressione FE upload
 - documentazione operativa deploy e rollback
+
+## Avanzamento
+
+### 2026-03-13 - Avvio implementazione POC
+
+- Implementate nel proxy route edge compatibili files API Box:
+  - `POST /api/v1/files` (+ slash variant)
+  - `GET /api/v1/files/{file_id}`
+  - `GET /api/v1/files/{file_id}/process/status`
+  - `GET /api/v1/files/{file_id}/content`
+  - `GET /api/v1/files/{file_id}/content/html`
+- Implementato adapter risposta upload BE -> shape Box (`status + file model`).
+- Implementato store in-memory POC per stato file/process e mapping metadata.
+- `process/status?stream=true` gestito con SSE compatibile (evento `status`).
+- Nota: persistenza e policy production-grade restano step successivi (store persistente + rollout).

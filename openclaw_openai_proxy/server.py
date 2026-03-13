@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 from pathlib import Path
 import hashlib
 import json
@@ -7,10 +9,11 @@ import logging
 import time
 import uuid
 from typing import Any, Dict
+from datetime import datetime
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .backend import BackendClient
 from .config import AgentConfig
@@ -23,6 +26,10 @@ config = settings.app_config
 backend_client = BackendClient(config)
 
 app = FastAPI(title="OpenClaw OpenAI Proxy", version="0.1.0")
+
+# In-memory mapping for edge upload compatibility endpoints (/api/v1/files*).
+# This is a Phase-1 store and will be replaced by persistent storage.
+EDGE_FILE_STORE: dict[str, dict[str, Any]] = {}
 
 
 def _resolve_valves_path() -> Path | None:
@@ -310,6 +317,125 @@ def _chat_completion_to_responses_shape(
     }
 
 
+def _to_epoch_seconds(value: Any) -> int:
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            pass
+    return int(time.time())
+
+
+def _try_decode_unverified_jwt_user_id(auth_header: str | None) -> str | None:
+    if not auth_header:
+        return None
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+
+    payload_part = parts[1]
+    padding = "=" * (-len(payload_part) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload_part + padding).decode("utf-8")
+        payload = json.loads(decoded)
+    except Exception:
+        return None
+
+    for key in ("id", "user_id", "sub", "uid", "email"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _edge_user_id_from_request(request: Request) -> str:
+    for header_name in ("x-debug-user", "x-openwebui-user-id"):
+        value = request.headers.get(header_name)
+        if value:
+            return value
+
+    jwt_user = _try_decode_unverified_jwt_user_id(request.headers.get("authorization"))
+    if jwt_user:
+        return jwt_user
+    return "edge-user"
+
+
+def _edge_backend_headers_from_request(request: Request, user_id: str) -> dict[str, str]:
+    headers = _bridge_headers_from_request(request)
+    if "x-debug-user" not in headers and user_id:
+        headers["x-debug-user"] = user_id
+    return headers
+
+
+def _adapt_be_upload_to_box_shape(be_payload: dict[str, Any], user_id: str) -> dict[str, Any]:
+    file_id = str(be_payload.get("upload_id") or uuid.uuid4())
+    filename = str(be_payload.get("filename") or "uploaded-file")
+    mime_type = be_payload.get("mime_type")
+    size_bytes = be_payload.get("size_bytes")
+    created_at = _to_epoch_seconds(be_payload.get("created_at"))
+    updated_at = _to_epoch_seconds(be_payload.get("updated_at"))
+
+    be_meta = {
+        "upload_id": be_payload.get("upload_id"),
+        "bucket": be_payload.get("bucket"),
+        "object_key": be_payload.get("object_key"),
+        "download_url": be_payload.get("download_url"),
+        "public_url": be_payload.get("public_url"),
+        "presigned_get_url": be_payload.get("presigned_get_url"),
+    }
+
+    file_model = {
+        "id": file_id,
+        "user_id": user_id,
+        "hash": be_payload.get("sha256"),
+        "filename": filename,
+        "data": {"status": "pending"},
+        "meta": {
+            "name": filename,
+            "content_type": mime_type,
+            "size": size_bytes,
+            "data": {"be_upload": be_meta},
+        },
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+    return {"status": True, **file_model}
+
+
+def _edge_store_file(file_payload: dict[str, Any], be_payload: dict[str, Any]) -> None:
+    file_id = str(file_payload["id"])
+    EDGE_FILE_STORE[file_id] = {
+        "file": {k: v for k, v in file_payload.items() if k != "status"},
+        "be": be_payload,
+        "processing_status": "completed",
+        "error": None,
+        "updated_at": int(time.time()),
+    }
+
+
+def _edge_get_file_record(file_id: str) -> dict[str, Any] | None:
+    return EDGE_FILE_STORE.get(file_id)
+
+
+async def _edge_fetch_be_download(
+    download_url: str, headers: dict[str, str]
+) -> httpx.Response:
+    if download_url.startswith("http://") or download_url.startswith("https://"):
+        def _get_sync() -> httpx.Response:
+            with httpx.Client(timeout=config.backend.timeout_seconds) as client:
+                return client.get(download_url, headers=headers)
+
+        return await asyncio.to_thread(_get_sync)
+
+    normalized_path = download_url if download_url.startswith("/") else f"/{download_url}"
+    return await backend_client.get(path=normalized_path, headers=headers)
+
+
 async def _forward_openai_json_to_be(
     path: str,
     payload: Dict[str, Any],
@@ -481,6 +607,114 @@ def _bridge_headers_from_request(request: Request) -> dict[str, str]:
         if value:
             headers[name] = value
     return headers
+
+
+# -------------------------
+# Edge Gateway compatibility endpoints for Open WebUI files API
+# -------------------------
+@app.post("/api/v1/files")
+@app.post("/api/v1/files/")
+async def edge_upload_file(request: Request):
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        raise HTTPException(status_code=400, detail="Upload requires multipart/form-data")
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty multipart body")
+
+    user_id = _edge_user_id_from_request(request)
+    headers = _edge_backend_headers_from_request(request, user_id=user_id)
+
+    try:
+        be_response = await backend_client.upload_multipart_raw(
+            body=body,
+            content_type=content_type,
+            headers=headers,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "Failed forwarding edge upload to BE", "error": str(exc)},
+        ) from exc
+
+    try:
+        be_payload = be_response.json()
+    except Exception:
+        be_payload = {"raw_response": be_response.text}
+
+    if be_response.status_code >= 400 or not isinstance(be_payload, dict):
+        return JSONResponse(status_code=be_response.status_code, content=be_payload)
+
+    adapted_payload = _adapt_be_upload_to_box_shape(be_payload, user_id=user_id)
+    _edge_store_file(adapted_payload, be_payload=be_payload)
+    return JSONResponse(status_code=200, content=adapted_payload)
+
+
+@app.get("/api/v1/files/{file_id}")
+async def edge_get_file(file_id: str):
+    record = _edge_get_file_record(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return JSONResponse(status_code=200, content=record["file"])
+
+
+@app.get("/api/v1/files/{file_id}/process/status")
+async def edge_get_file_process_status(file_id: str, stream: bool = False):
+    record = _edge_get_file_record(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    status_value = str(record.get("processing_status") or "completed")
+    error_value = record.get("error")
+
+    if stream:
+        async def event_stream() -> Any:
+            payload: dict[str, Any] = {"status": status_value}
+            if status_value == "failed" and error_value:
+                payload["error"] = error_value
+            yield f"data: {json.dumps(payload)}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    return {"status": status_value}
+
+
+@app.get("/api/v1/files/{file_id}/content")
+async def edge_get_file_content(file_id: str, request: Request):
+    record = _edge_get_file_record(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    be_payload = record.get("be", {})
+    download_url = str(be_payload.get("download_url") or f"/api/v1/uploads/{file_id}/download")
+    headers = _edge_backend_headers_from_request(request, user_id=str(record["file"]["user_id"]))
+
+    try:
+        upstream = await _edge_fetch_be_download(download_url=download_url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "Failed fetching file content from BE", "error": str(exc)},
+        ) from exc
+
+    media_type = upstream.headers.get("content-type", "application/octet-stream")
+    response_headers: dict[str, str] = {}
+    content_disposition = upstream.headers.get("content-disposition")
+    if content_disposition:
+        response_headers["content-disposition"] = content_disposition
+
+    return Response(
+        content=upstream.content,
+        media_type=media_type,
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )
+
+
+@app.get("/api/v1/files/{file_id}/content/html")
+async def edge_get_file_content_html(file_id: str, request: Request):
+    return await edge_get_file_content(file_id, request)
 
 
 @app.post("/v1/uploads/bridge")

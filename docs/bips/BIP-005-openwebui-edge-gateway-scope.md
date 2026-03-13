@@ -94,3 +94,8 @@ Fase 3 (opzionale):
 - Confermato requisito hard-intercept su `/api/v1/files`.
 - Confermato limite strutturale Function-only.
 - Definito pivot ufficiale verso Edge Gateway.
+
+### 2026-03-13 - Kickoff Fase 1
+
+- Avviata implementazione POC route edge `/api/v1/files*` nel proxy.
+- Confermata invariante completions: protocollo FE invariato, routing deciso dal gateway.

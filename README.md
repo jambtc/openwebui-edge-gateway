@@ -31,6 +31,11 @@ con due opzioni:
   - `/v1/responses` (con fallback su chat/completions se upstream non disponibile)
 - Bridge upload BE:
   - `/v1/uploads/bridge` (alias `/uploads/bridge`) -> `be /api/v1/uploads`
+- Edge upload compatibility (POC Fase 1):
+  - `POST /api/v1/files`
+  - `GET /api/v1/files/{id}`
+  - `GET /api/v1/files/{id}/process/status`
+  - `GET /api/v1/files/{id}/content`
 - Session bridge function lato Box (`body.user = sha256(user_id:chat_id)`).
 
 ## Nuovo scope (Edge Gateway)

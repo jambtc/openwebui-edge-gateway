@@ -46,6 +46,11 @@ Target edge gateway:
   - `POST /v1/completions` (alias `/completions`)
   - `POST /v1/responses` (alias `/responses`)
   - `POST /v1/uploads/bridge` (alias `/uploads/bridge`)
+- Endpoint edge files API (POC Fase 1):
+  - `POST /api/v1/files`
+  - `GET /api/v1/files/{id}`
+  - `GET /api/v1/files/{id}/process/status`
+  - `GET /api/v1/files/{id}/content`
 - Session bridge attivo in Function Box:
   - `body.user = sha256(user_id:chat_id)`
 - `v1/responses` ha fallback su `chat/completions` se upstream non disponibile.

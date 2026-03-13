@@ -36,6 +36,26 @@ class BackendClient:
 
         return await asyncio.to_thread(_post_sync)
 
+    async def get(
+        self,
+        path: str,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str | int | bool] | None = None,
+    ) -> httpx.Response:
+        target_url = f"{self.base_url}{path}"
+        resolved_headers = dict(headers or {})
+        resolved_params = dict(params or {})
+
+        def _get_sync() -> httpx.Response:
+            with httpx.Client(timeout=self._timeout) as client:
+                return client.get(
+                    target_url,
+                    headers=resolved_headers,
+                    params=resolved_params,
+                )
+
+        return await asyncio.to_thread(_get_sync)
+
     async def upload_multipart_raw(
         self,
         body: bytes,
