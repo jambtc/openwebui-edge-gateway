@@ -32,6 +32,19 @@ Ruolo del gateway:
 - orchestrazione verso BE per upload/metadata/doc URLs
 - arricchimento pre-completion quando necessario
 
+## Completions: invarianti
+
+Il pivot non cambia il contratto funzionale lato chat:
+- Box continua a ricevere una risposta chat OpenAI-compatible come prima.
+- L'utente non parla "direttamente" con OPC: parla sempre con Box.
+- E il gateway a decidere dove inoltrare ogni chiamata in base alla route.
+
+Flusso pratico chat (invariante):
+1. FE Box chiama `/api/chat/completions` (passa dal gateway, ma resta compatibile).
+2. Box backend elabora e inoltra al provider OpenAI-compatible configurato.
+3. Provider target resta `gateway/proxy -> be -> opc`.
+4. Risposta torna a Box in shape attesa, quindi FE non deve cambiare.
+
 ## Scope incrementale
 
 Fase 1 (prioritaria):
@@ -65,11 +78,13 @@ Fase 3 (opzionale):
 - upload effettivo visibile su BE con metadata correlati
 - FE non mostra regressioni nel workflow upload/process/status
 - completions ricevono riferimenti documento (`public_url`) coerenti
+- completions compatibili lato FE (nessun cambio UX/protocollo lato Box)
 
 ## Dipendenze
 
 - `BIP-002` (intercetto route upload)
 - `BIP-004` (lookup upload + rewrite pre-completion)
+- `BIP-006` (piano tecnico implementazione Fase 1)
 - allineamento deployment DNS/reverse-proxy per mettere il gateway davanti a Box
 
 ## Avanzamento
