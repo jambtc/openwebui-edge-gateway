@@ -4,76 +4,53 @@ Data aggiornamento: 2026-03-13
 
 ## Riferimenti repository
 
-- `proxy`: `/var/www/openclaw-openai-proxy`
-- `boxedai`: `/var/www/open-webui`
-- `be`: `/var/www/openclaw-based-backend` (path richiesto: `/var/www/openclaw-based-backed`)
-- `openclaw` (repo): `https://github.com/openclaw/openclaw`
+- `proxy` (gateway): `/var/www/openclaw-openai-proxy`
+- `boxedai` (Open WebUI): `/var/www/open-webui`
+- `be`: `/var/www/openclaw-based-backend` (path richiesto nel brief: `/var/www/openclaw-based-backed`)
+- `openclaw` (opc): `https://github.com/openclaw/openclaw`
 
 ## Naming condiviso
 
-- `proxy` = componente in evoluzione verso **edge gateway**
-- `boxedai` = interfaccia Open WebUI
+- `gateway` = `proxy` evoluto a edge gateway (container: `opc-proxy`)
+- `boxedai` / `box` = Open WebUI (container: `open-webui`)
 - `be` = openclaw-based-backend (BFF + RAG documentale)
 - `openclaw` / `opc` = runtime agent a valle del backend
 
-## Perche il pivot a Edge Gateway
+## Flusso logico di riferimento
 
-Requisito prodotto:
-- intercettare `POST /api/v1/files`
-- evitare persistenza finale documento nel dominio Box
-- forzare percorso documenti `box -> proxy -> be`
+- `boxedai -> gateway -> be -> openclaw` (e ritorno)
+- vincolo documentale: upload file deve passare da `gateway -> be`, senza persistenza finale nel dominio Box
 
-Vincolo tecnico:
-- le Function OpenWebUI non intercettano i router HTTP files (`/api/v1/files`)
-- quindi serve un layer L7 davanti a Box (reverse proxy / API gateway)
+## Stato implementazione (validato)
 
-## Flow: stato attuale vs target
+- `POST /api/v1/files` intercettato dal gateway e inoltrato a `be /api/v1/uploads`
+- risposta upload BE adattata a shape Box-compatible
+- `GET /api/v1/files/{id}/process/status?stream=true` servita dal gateway
+- routing OpenAI compatibile attivo verso BE:
+  - `/v1/chat/completions`
+  - `/v1/completions`
+  - `/v1/responses` (con fallback su chat/completions)
+- edge pass-through attivo per route non intercettate (gateway davanti a Box)
 
-Stato attuale (implementato):
-- chat/completions: `boxedai -> proxy -> be -> openclaw`
-- upload bridge tecnico disponibile su `proxy /v1/uploads/bridge`
+## Porte e servizi (topologia locale test)
 
-Target edge gateway:
-- richieste Box FE passano da gateway
-- route upload `/api/v1/files*` intercettate e deviate su `proxy -> be`
-- completions arricchite con `public_url` risolta via `GET /api/v1/uploads`
+- `opc-proxy` (gateway):
+  - `3001 -> 4010` (entrypoint FE/API)
+  - `4010 -> 4010` (entrypoint provider OpenAI-compatible)
+- `open-webui` (boxedai backend):
+  - `3002 -> 8080` (upstream del gateway)
+- `mvp-qdrant`:
+  - `6333 -> 6333`
+- `be` remoto:
+  - `https://be-boxedai-contabo.theia-innovation.com` (443)
+- `openclaw` runtime (a valle BE):
+  - `18789` / `18789/ws` (infrastruttura runtime)
 
-## Contratto operativo corrente
+Nota: in locale il browser usa `http://localhost:3001` (gateway). Il gateway inoltra a Box su `BOX_BASE_URL` (attualmente `http://host.docker.internal:3002`).
 
-- Endpoint OpenAI nel proxy:
-  - `GET /v1/models` (alias `/models`)
-  - `POST /v1/chat/completions` (alias `/chat/completions`)
-  - `POST /v1/completions` (alias `/completions`)
-  - `POST /v1/responses` (alias `/responses`)
-  - `POST /v1/uploads/bridge` (alias `/uploads/bridge`)
-- Endpoint edge files API (POC Fase 1):
-  - `POST /api/v1/files`
-  - `GET /api/v1/files/{id}`
-  - `GET /api/v1/files/{id}/process/status`
-  - `GET /api/v1/files/{id}/content`
-- Session bridge attivo in Function Box:
-  - `body.user = sha256(user_id:chat_id)`
-- `v1/responses` ha fallback su `chat/completions` se upstream non disponibile.
+## Invarianti tecniche
 
-## Porte esposte (contesto)
-
-- `boxedai` (`/var/www/open-webui`):
-  - `127.0.0.1:3001 -> 8080`
-  - `6333 -> 6333` (Qdrant)
-- `proxy` (`/var/www/openclaw-openai-proxy`):
-  - `4010 -> 4010`
-- `be` API (`/var/www/openclaw-based-backend`):
-  - `8000` (default `BFF_PORT`)
-- `be` infra:
-  - `5432` (Postgres)
-  - `9000` / `9001` (MinIO API/Console)
-  - `8080` (Keycloak)
-- `openclaw` esterno:
-  - `18789` HTTP
-  - `18789/ws` WebSocket
-
-## Invarianti
-
-- compatibilita FE Box senza regressioni UX upload/chat
-- osservabilita end-to-end (correlation id file/chat/user)
-- centralizzazione regole di routing e trasformazione nel gateway
+- nessuna regressione UX lato Box su chat/upload
+- mapping file conservato nel gateway (`meta.data.be_upload`)
+- log applicativi con evidenza upload BE e shape di ritorno Box
+- prossima fase: lookup `GET /api/v1/uploads` + inject `public_url` prima della completion

@@ -124,3 +124,25 @@ Uso:
 - Implementato store in-memory POC per stato file/process e mapping metadata.
 - `process/status?stream=true` gestito con SSE compatibile (evento `status`).
 - Nota: persistenza e policy production-grade restano step successivi (store persistente + rollout).
+
+### 2026-03-13 - Estensione edge pass-through
+
+- Introdotto catch-all pass-through HTTP per route non intercettate verso Box upstream (`edge.box_base_url`).
+- Aggiunta configurazione edge:
+  - `edge.enabled`
+  - `edge.box_base_url`
+  - `edge.timeout_seconds`
+- Validato wiring locale:
+  - Browser -> gateway `localhost:3001`
+  - gateway -> Box upstream `localhost:3002`
+
+### 2026-03-13 - Evidenze runtime upload
+
+- Log gateway con risposta BE upload completa (`upload_id`, `object_key`, `public_url`, `download_url`).
+- Log gateway con risposta adattata Box (`meta.data.be_upload` valorizzato).
+- Rotta `POST /api/v1/files` validata con `200` e `process/status` SSE `200`.
+
+### 2026-03-13 - Compatibilita WebSocket FE
+
+- Implementato pass-through WS su `/ws/socket.io/*` per il canale realtime Box.
+- Versione libreria `websockets` gestita in modo compatibile (`extra_headers` / `additional_headers`).

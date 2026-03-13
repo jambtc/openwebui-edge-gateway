@@ -1,6 +1,6 @@
 # BIP-002 - Box upload intercept (`/api/v1/files`) verso proxy
 
-> Stato attuale: `🔄 In Esecuzione` - 2026-03-11
+> Stato attuale: `✅ Completata` - 2026-03-13
 > Owner: `box + proxy` team
 
 ## Contesto
@@ -79,3 +79,14 @@ Dettaglio operativo minimo:
 - Requisito confermato: il file non deve terminare in Box, deve passare `box -> proxy -> be`.
 - Decisione: intercetto route upload non ottenibile con sola Function; serve fork Box o reverse proxy su `/api/v1/files*`.
 - BIP portata in esecuzione.
+
+### 2026-03-13 - Validazione E2E completata
+
+- Gateway messo davanti a Box in modalita edge (`localhost:3001 -> opc-proxy`).
+- Upload FE intercettato su:
+  - `POST /api/v1/files/?process=true`
+  - `GET /api/v1/files/{id}/process/status?stream=true`
+- Gateway inoltra il multipart a `be /api/v1/uploads`.
+- Verificata risposta BE nei log gateway con campi: `upload_id`, `object_key`, `download_url`, `public_url`.
+- Verificata risposta adattata Box-compatible con metadati BE in `meta.data.be_upload`.
+- Criteri di accettazione BIP-002 soddisfatti per il perimetro locale/contabo testato.

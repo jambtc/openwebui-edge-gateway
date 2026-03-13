@@ -12,7 +12,9 @@ from typing import Any, Dict
 from datetime import datetime
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+import websockets
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.websockets import WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .backend import BackendClient
@@ -30,6 +32,26 @@ app = FastAPI(title="OpenClaw OpenAI Proxy", version="0.1.0")
 # In-memory mapping for edge upload compatibility endpoints (/api/v1/files*).
 # This is a Phase-1 store and will be replaced by persistent storage.
 EDGE_FILE_STORE: dict[str, dict[str, Any]] = {}
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+
+
+def _json_for_log(payload: Any, max_chars: int = 4000) -> str:
+    try:
+        raw = json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception:
+        raw = str(payload)
+    if len(raw) > max_chars:
+        return f"{raw[:max_chars]}...<truncated {len(raw) - max_chars} chars>"
+    return raw
 
 
 def _resolve_valves_path() -> Path | None:
@@ -477,7 +499,10 @@ async def chat_completions(request: Request):
 
     # Debug: remove if noisy
     print(
-        f"proxy→be chat.completions model={body.get('model')} user={(body.get('user') or '')[:12]}",
+        "proxy→be chat.completions "
+        f"model={body.get('model')} "
+        f"payload_user={(body.get('user') or '')[:12]} "
+        f"hdr_user={(headers.get('x-debug-user') or '')[:12]}",
         flush=True,
     )
 
@@ -504,7 +529,10 @@ async def completions(request: Request):
     headers = _bridge_headers_from_request(request)
 
     print(
-        f"proxy→be completions model={body.get('model')} user={(body.get('user') or '')[:12]}",
+        "proxy→be completions "
+        f"model={body.get('model')} "
+        f"payload_user={(body.get('user') or '')[:12]} "
+        f"hdr_user={(headers.get('x-debug-user') or '')[:12]}",
         flush=True,
     )
 
@@ -531,7 +559,10 @@ async def responses(request: Request):
     headers = _bridge_headers_from_request(request)
 
     print(
-        f"proxy→be responses model={body.get('model')} user={(body.get('user') or '')[:12]}",
+        "proxy→be responses "
+        f"model={body.get('model')} "
+        f"payload_user={(body.get('user') or '')[:12]} "
+        f"hdr_user={(headers.get('x-debug-user') or '')[:12]}",
         flush=True,
     )
     _normalize_openai_model(body, require_model=False)
@@ -602,11 +633,143 @@ async def responses_alias(request: Request):
 
 def _bridge_headers_from_request(request: Request) -> dict[str, str]:
     headers: dict[str, str] = {}
-    for name in ("authorization", "x-debug-user"):
-        value = request.headers.get(name)
-        if value:
-            headers[name] = value
+
+    authorization = request.headers.get("authorization")
+    if authorization:
+        headers["authorization"] = authorization
+
+    x_debug_user = request.headers.get("x-debug-user")
+    if not x_debug_user:
+        x_debug_user = request.headers.get("x-openwebui-user-id")
+    if not x_debug_user:
+        x_debug_user = _try_decode_unverified_jwt_user_id(authorization)
+    if x_debug_user:
+        headers["x-debug-user"] = x_debug_user
+
     return headers
+
+
+def _edge_target_url(request: Request, full_path: str) -> str:
+    box_base_url = config.edge.box_base_url
+    if box_base_url is None:
+        raise HTTPException(
+            status_code=503, detail="Edge passthrough enabled but edge.box_base_url is not configured"
+        )
+
+    base = str(box_base_url).rstrip("/")
+    if full_path:
+        target_url = f"{base}/{full_path.lstrip('/')}"
+    else:
+        target_url = f"{base}/"
+
+    query = str(request.url.query or "")
+    if query:
+        target_url = f"{target_url}?{query}"
+    return target_url
+
+
+def _edge_passthrough_headers(request: Request) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for name, value in request.headers.items():
+        lower = name.lower()
+        if lower in HOP_BY_HOP_HEADERS:
+            continue
+        if lower in {"host", "content-length"}:
+            continue
+        headers[name] = value
+    return headers
+
+
+def _edge_response_headers(source_headers: httpx.Headers) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for name, value in source_headers.items():
+        lower = name.lower()
+        if lower in HOP_BY_HOP_HEADERS:
+            continue
+        if lower == "content-length":
+            continue
+        headers[name] = value
+    return headers
+
+
+def _edge_ws_target_url(websocket: WebSocket, full_path: str) -> str:
+    box_base_url = config.edge.box_base_url
+    if box_base_url is None:
+        raise HTTPException(
+            status_code=503, detail="Edge passthrough enabled but edge.box_base_url is not configured"
+        )
+
+    raw_base = str(box_base_url).rstrip("/")
+    if raw_base.startswith("https://"):
+        ws_base = "wss://" + raw_base[len("https://") :]
+    elif raw_base.startswith("http://"):
+        ws_base = "ws://" + raw_base[len("http://") :]
+    else:
+        ws_base = raw_base
+
+    if full_path:
+        target_url = f"{ws_base}/ws/socket.io/{full_path.lstrip('/')}"
+    else:
+        target_url = f"{ws_base}/ws/socket.io/"
+
+    query = str(websocket.url.query or "")
+    if query:
+        target_url = f"{target_url}?{query}"
+    return target_url
+
+
+def _edge_ws_passthrough_headers(websocket: WebSocket) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for name, value in websocket.headers.items():
+        lower = name.lower()
+        if lower in HOP_BY_HOP_HEADERS:
+            continue
+        if lower in {
+            "host",
+            "upgrade",
+            "connection",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "sec-websocket-extensions",
+            "sec-websocket-protocol",
+        }:
+            continue
+        headers[name] = value
+    return headers
+
+
+async def _edge_open_upstream_ws(
+    target_url: str,
+    headers: dict[str, str],
+    timeout_seconds: float,
+):
+    connect_kwargs = {
+        "open_timeout": timeout_seconds,
+        "close_timeout": 5,
+    }
+
+    # Compatibility across websockets versions:
+    # - legacy: extra_headers
+    # - newer: additional_headers
+    attempts = ("extra_headers", "additional_headers")
+    last_exc: Exception | None = None
+
+    for header_kw in attempts:
+        try:
+            return await websockets.connect(
+                target_url,
+                **connect_kwargs,
+                **{header_kw: headers},
+            )
+        except TypeError as exc:
+            last_exc = exc
+            if "unexpected keyword argument" in str(exc):
+                continue
+            raise
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Failed to open upstream websocket")
 
 
 # -------------------------
@@ -643,11 +806,27 @@ async def edge_upload_file(request: Request):
     except Exception:
         be_payload = {"raw_response": be_response.text}
 
+    log.info(
+        "EDGE upload -> BE status=%s user=%s be_json=%s",
+        be_response.status_code,
+        user_id,
+        _json_for_log(be_payload),
+    )
+    print(
+        f"EDGE upload -> BE status={be_response.status_code} user={user_id} be_json={_json_for_log(be_payload)}",
+        flush=True,
+    )
+
     if be_response.status_code >= 400 or not isinstance(be_payload, dict):
         return JSONResponse(status_code=be_response.status_code, content=be_payload)
 
     adapted_payload = _adapt_be_upload_to_box_shape(be_payload, user_id=user_id)
     _edge_store_file(adapted_payload, be_payload=be_payload)
+    log.info("EDGE upload -> Box shape json=%s", _json_for_log(adapted_payload))
+    print(
+        f"EDGE upload -> Box shape json={_json_for_log(adapted_payload)}",
+        flush=True,
+    )
     return JSONResponse(status_code=200, content=adapted_payload)
 
 
@@ -751,6 +930,17 @@ async def uploads_bridge_v1(request: Request):
     except Exception:
         be_payload = {"raw_response": be_response.text}
 
+    log.info(
+        "UPLOAD bridge -> BE status=%s bridge_upload_id=%s be_json=%s",
+        be_response.status_code,
+        bridge_upload_id,
+        _json_for_log(be_payload),
+    )
+    print(
+        f"UPLOAD bridge -> BE status={be_response.status_code} bridge_upload_id={bridge_upload_id} be_json={_json_for_log(be_payload)}",
+        flush=True,
+    )
+
     if isinstance(be_payload, dict):
         response_payload: Dict[str, Any] = {
             "bridge_upload_id": bridge_upload_id,
@@ -761,6 +951,12 @@ async def uploads_bridge_v1(request: Request):
             "bridge_upload_id": bridge_upload_id,
             "be_payload": be_payload,
         }
+
+    log.info("UPLOAD bridge -> response json=%s", _json_for_log(response_payload))
+    print(
+        f"UPLOAD bridge -> response json={_json_for_log(response_payload)}",
+        flush=True,
+    )
 
     return JSONResponse(status_code=be_response.status_code, content=response_payload)
 
@@ -936,3 +1132,121 @@ async def pipeline_valves_spec_v1(pipeline_id: str):
 @app.post("/v1/{pipeline_id}/valves/update")
 async def pipeline_valves_update_v1(pipeline_id: str, request: Request):
     return await pipeline_valves_update(pipeline_id, request)
+
+
+# -------------------------
+# Edge websocket passthrough for Open WebUI socket.io
+# -------------------------
+@app.websocket("/ws/socket.io/")
+@app.websocket("/ws/socket.io/{full_path:path}")
+async def edge_socketio_ws(websocket: WebSocket, full_path: str = ""):
+    if not config.edge.enabled:
+        await websocket.close(code=1008, reason="Edge passthrough disabled")
+        return
+
+    target_url = _edge_ws_target_url(websocket, full_path)
+    upstream_headers = _edge_ws_passthrough_headers(websocket)
+    log.info("Edge WS connect %s -> %s", websocket.url.path, target_url)
+
+    await websocket.accept()
+    upstream = None
+
+    try:
+        upstream = await _edge_open_upstream_ws(
+            target_url=target_url,
+            headers=upstream_headers,
+            timeout_seconds=config.edge.timeout_seconds,
+        )
+
+        async def client_to_upstream() -> None:
+            while True:
+                message = await websocket.receive()
+                msg_type = message.get("type")
+                if msg_type == "websocket.disconnect":
+                    break
+                text = message.get("text")
+                if text is not None:
+                    await upstream.send(text)
+                    continue
+                data = message.get("bytes")
+                if data is not None:
+                    await upstream.send(data)
+
+        async def upstream_to_client() -> None:
+            while True:
+                data = await upstream.recv()
+                if isinstance(data, bytes):
+                    await websocket.send_bytes(data)
+                else:
+                    await websocket.send_text(data)
+
+        client_task = asyncio.create_task(client_to_upstream())
+        upstream_task = asyncio.create_task(upstream_to_client())
+
+        done, pending = await asyncio.wait(
+            {client_task, upstream_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+        for task in done:
+            task.result()
+
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        log.warning("Edge WS passthrough failed: %s", exc)
+        try:
+            await websocket.close(code=1011, reason="Edge WS upstream error")
+        except Exception:
+            pass
+    finally:
+        if upstream is not None:
+            try:
+                await upstream.close()
+            except Exception:
+                pass
+
+
+# -------------------------
+# Edge catch-all passthrough (unmatched routes -> Open WebUI backend)
+# -------------------------
+@app.api_route(
+    "/",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+)
+@app.api_route(
+    "/{full_path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+)
+async def edge_passthrough(request: Request, full_path: str = ""):
+    if not config.edge.enabled:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    target_url = _edge_target_url(request, full_path)
+    forwarded_headers = _edge_passthrough_headers(request)
+    body = await request.body()
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=config.edge.timeout_seconds, follow_redirects=False
+        ) as client:
+            upstream = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=forwarded_headers,
+                content=body,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "Edge passthrough upstream error", "error": str(exc)},
+        ) from exc
+
+    response_headers = _edge_response_headers(upstream.headers)
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )

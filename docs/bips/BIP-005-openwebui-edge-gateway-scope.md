@@ -99,3 +99,10 @@ Fase 3 (opzionale):
 
 - Avviata implementazione POC route edge `/api/v1/files*` nel proxy.
 - Confermata invariante completions: protocollo FE invariato, routing deciso dal gateway.
+
+### 2026-03-13 - Validazione edge runtime locale
+
+- Gateway esposto come front-door su `localhost:3001` (container `opc-proxy`).
+- Box spostato come upstream su `localhost:3002` (container `open-webui`).
+- Intercetto upload file validato in runtime con log applicativi.
+- Aggiunto pass-through WebSocket `/ws/socket.io/*` per mantenere funzionalita FE realtime.
