@@ -4,7 +4,7 @@ Data aggiornamento: 2026-03-13
 
 ## Riferimenti repository
 
-- `proxy` (gateway): `/var/www/openclaw-openai-proxy`
+- `proxy` (gateway): `/var/www/openwebui-edge-gateway`
 - `boxedai` (Open WebUI): `/var/www/open-webui`
 - `be`: `/var/www/openclaw-based-backend` (path richiesto nel brief: `/var/www/openclaw-based-backed`)
 - `openclaw` (opc): `https://github.com/openclaw/openclaw`

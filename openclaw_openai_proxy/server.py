@@ -1019,11 +1019,16 @@ async def chat_completions(request: Request):
     body = _get_body(payload)
     headers = _bridge_headers_from_request(request)
     chat_id = _edge_provider_chat_id(request, body)
+    user_id = headers.get("x-debug-user", "")
+
+    # Inject session key only when not already set (e.g. by openclaw_session_bridge function).
+    if chat_id and user_id and not body.get("user"):
+        body["user"] = _session_key(user_id, chat_id)
 
     if chat_id:
         await _edge_enrich_chat_messages_for_chat_id(
             chat_id=chat_id,
-            user_id=headers.get("x-debug-user", ""),
+            user_id=user_id,
             headers=headers,
             messages=body.setdefault("messages", []),
             log_prefix="proxy→be chat.documents",
