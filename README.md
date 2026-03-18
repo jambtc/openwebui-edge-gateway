@@ -1,97 +1,119 @@
-# OpenClaw OpenAI Proxy (towards OpenWebUI Edge Gateway)
+# OpenWebUI Edge Gateway
 
-Questo repository nasce come OpenAI-compatible proxy (`boxedai -> proxy -> be -> openclaw`),
-ma il requisito prodotto emerso sul flusso documenti ha cambiato il perimetro:
+Gateway applicativo davanti a OpenWebUI per BoxedAI.
 
-- il caricamento `POST /api/v1/files` deve essere intercettato
-- il file non deve restare nel dominio Box
-- il percorso target deve essere `box -> proxy -> be` (RAG documentale)
+Funzione attuale del software:
 
-Per questo il progetto evolve verso un vero **Edge Gateway** davanti a OpenWebUI.
+- intercettare le route Box che devono uscire dal dominio OpenWebUI
+- inoltrare upload e completion al `be`
+- mantenere compatibilita con frontend Box, WebSocket e OIDC
+- reiniettare il contesto documento sulla completion reale emessa da Box
 
-Nome target repository (proposto): **`openwebui-edge-gateway`**.
+Flusso operativo corrente:
 
-## Perche il pivot
+- `BR -> gateway -> box/be -> opc`
 
-Con le sole Function OpenWebUI (anche avanzate) non si intercetta direttamente
-`/api/v1/files`: le Function operano nel percorso chat/completions, non sui router
-HTTP files del backend Box.
+## Cosa fa oggi
 
-Quindi per il requisito upload serve un layer L7 che intercetti route API,
-con due opzioni:
-
-1. fork Box (FE/BE) con reroute upload
-2. reverse proxy/API gateway davanti a Box che intercetta `/api/v1/files*`
-
-## Stato attuale implementato
-
-- Routing OpenAI-compatible verso BE:
+- intercetta `POST /api/v1/files`
+- serve le route compatibili Box per stato e contenuto file
+- intercetta `POST /api/v1/chats/new` e `POST|PUT|PATCH /api/v1/chats/{chat_id}`
+- intercetta `POST /api/chat/completions` e `POST /api/v1/chat/completions`
+- inoltra al `be`:
   - `/v1/chat/completions`
   - `/v1/completions`
-  - `/v1/responses` (con fallback su chat/completions se upstream non disponibile)
-- Bridge upload BE:
-  - `/v1/uploads/bridge` (alias `/uploads/bridge`) -> `be /api/v1/uploads`
-- Edge upload compatibility (POC Fase 1):
-  - `POST /api/v1/files`
-  - `GET /api/v1/files/{id}`
-  - `GET /api/v1/files/{id}/process/status`
-  - `GET /api/v1/files/{id}/content`
-- Session bridge function lato Box (`body.user = sha256(user_id:chat_id)`).
+  - `/v1/responses` con fallback su chat completions se upstream non disponibile
+- esegue pass-through WebSocket su `/ws/socket.io/*`
+- esegue catch-all HTTP verso Box per le route non intercettate
+- mantiene funzionante il login OIDC/Keycloak dietro gateway
 
-## Nuovo scope (Edge Gateway)
+## Stato attuale noto
 
-Scope prioritario:
+- model esposto a Box: `main`
+- agent effettivo inoltrato al `be`: `assistant`
+- priorita URL documento nel gateway:
+  1. `presigned_get_url`
+  2. `public_url`
+  3. `download_url`
 
-1. Intercettare `POST /api/v1/files` (e route collegate) a livello gateway.
-2. Inoltrare upload a `proxy -> be` e restituire shape compatibile al FE Box.
-3. Prima della completion, risolvere `public_url` via `GET /api/v1/uploads` e arricchire il messaggio.
+Limite residuo noto:
 
-Dettaglio operativo e decisioni nei BIP sotto `docs/bips`.
+- il `be` continua a restituire `public_url` / `presigned_get_url` con host locale `localhost:9000`
+- quindi il punto aperto residuo e lato `be` / MinIO exposure, non lato gateway
 
-## BIP di riferimento
+## Documentazione corrente
 
-- `BIP-001`: visione full-routing
-- `BIP-002`: intercetto upload Box `/api/v1/files*`
-- `BIP-003`: upload bridge + inject (attualmente sospesa parte inject)
-- `BIP-004`: correlazione file/chat + lookup upload pre-completion
-- `BIP-005`: scope ufficiale Edge Gateway
-- `BIP-006`: implementazione tecnica Fase 1 edge (upload + pass-through)
+- Contesto operativo: [docs/00-contesto-iniziale.md](/var/www/openwebui-edge-gateway/docs/00-contesto-iniziale.md)
+- Flusso dati e infrastruttura: [docs/documentazione/01-flusso-dati-edge-gateway.md](/var/www/openwebui-edge-gateway/docs/documentazione/01-flusso-dati-edge-gateway.md)
+- Rollout VPS: [docs/documentazione/02-modifiche-vps-rollout.md](/var/www/openwebui-edge-gateway/docs/documentazione/02-modifiche-vps-rollout.md)
+- Verifica allineamento: [docs/documentazione/03-verifica-allineamento-software.md](/var/www/openwebui-edge-gateway/docs/documentazione/03-verifica-allineamento-software.md)
 
-## Documentazione operativa
+## Storico e roadmap
 
-- Contesto operativo: `docs/00-contesto-iniziale.md`
-- Data flow e diagrammi (container + porte): `docs/documentazione/01-flusso-dati-edge-gateway.md`
-- BIP index: `docs/bips/README.md`
+Per l'evoluzione del progetto e le decisioni progressive:
 
-## Avvio locale
+- [docs/archivio/README.md](/var/www/openwebui-edge-gateway/docs/archivio/README.md)
+- [docs/bips/README.md](/var/www/openwebui-edge-gateway/docs/bips/README.md)
+
+## Avvio consigliato: Docker Compose
+
+La configurazione consigliata oggi e `docker compose`.
+
+Motivi:
+
+- espone il gateway sulle porte giuste per il test locale:
+  - `3001 -> 4010` per il traffico browser / Box pubblico
+  - `4010 -> 4010` per il provider OpenAI-compatible
+- carica automaticamente `.env`
+- usa `config.yaml` come configurazione runtime del gateway
+- rende parametrico anche il target backend tramite `BACKEND_BASE_URL`
+- monta il container `opc-proxy` sulla rete Docker condivisa `tradarb_default`
+- mantiene il wiring coerente con Box locale su `BOX_BASE_URL`
+
+Prerequisiti:
+
+- rete Docker esterna presente: `tradarb_default`
+- Box locale raggiungibile all'URL definito in `.env`, oggi:
+  - `BOX_BASE_URL=http://host.docker.internal:3002`
+- backend locale o VPS raggiungibile all'URL definito in `.env`, oggi:
+  - `BACKEND_BASE_URL=http://127.0.0.1:8000`
+
+Avvio:
 
 ```bash
-cd /var/www/openclaw-openai-proxy
+cd /var/www/openwebui-edge-gateway
+docker compose up -d --build
+```
+
+Verifica rapida:
+
+```bash
+docker ps --filter name=opc-proxy
+curl http://localhost:3001/healthz
+curl http://localhost:4010/v1/models
+```
+
+Comportamento atteso:
+
+- `http://localhost:3001` e l'entrypoint del gateway per il browser
+- `http://localhost:4010` espone le route OpenAI-compatible del gateway
+- il container avviato e `opc-proxy`
+
+Nota operativa:
+
+- se Box gira su una porta host diversa, aggiorna `BOX_BASE_URL` nel file `.env` prima del `docker compose up`
+- se il backend non e locale su `127.0.0.1:8000`, aggiorna `BACKEND_BASE_URL` nel file `.env`
+- in VPS, invece di `host.docker.internal:3002`, il valore consigliato per Box resta `http://open-webui:8080`
+
+## Avvio locale alternativo: venv
+
+Utile solo per sviluppo locale senza container.
+
+```bash
+cd /var/www/openwebui-edge-gateway
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 OPENCLAW_PROXY_CONFIG=config.yaml openclaw-openai-proxy
 ```
 
 Servizio di default: `0.0.0.0:4010`.
-
-## Edge passthrough verso Box
-
-Per usare il gateway come reverse proxy edge davanti a OpenWebUI (Box),
-abilita in `config.yaml`:
-
-```yaml
-edge:
-  enabled: true
-  box_base_url: "${BOX_BASE_URL}"
-  timeout_seconds: 120
-```
-
-Con questa opzione, tutte le route non gestite localmente dal gateway
-vengono inoltrate a Box. Le route intercettate localmente (es. `/api/v1/files*`
-e OpenAI-compatible) restano sotto controllo gateway.
-
-In `.env` puoi quindi variare facilmente la porta locale Box, ad esempio:
-
-```bash
-BOX_BASE_URL=http://host.docker.internal:3002
-```

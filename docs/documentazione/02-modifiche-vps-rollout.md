@@ -1,6 +1,6 @@
 # Modifiche VPS e Rollout Operativo
 
-Data aggiornamento: 2026-03-13
+Data aggiornamento: 2026-03-17
 
 ## Obiettivo
 
@@ -9,7 +9,7 @@ Portare in VPS il wiring corretto:
 - dominio Box pubblico davanti al gateway
 - Box dietro al gateway come upstream interno
 - flusso applicativo reale:
-  - `browser -> gateway -> box/be -> opc`
+  - `BR -> gateway -> box/be -> opc`
 
 ## Stato target in VPS
 
@@ -43,6 +43,7 @@ Motivo:
   - `POST /api/v1/files`
   - `POST /api/v1/chats/new`
   - `POST /api/chat/completions`
+  - `GET /oauth/oidc/callback`
 
 Target corretto lato Caddy:
 
@@ -77,7 +78,7 @@ In VPS il pattern corretto e preferibilmente:
 
 Nel repo `proxy`:
 
-- file: `/var/www/openclaw-openai-proxy/.env`
+- file: `/var/www/openwebui-edge-gateway/.env`
 - variabile:
 
 ```bash
@@ -101,11 +102,13 @@ Nel repo Box:
 
 - file: `/var/www/open-webui/.env`
 
-Variabili chiave:
+Variabili chiave in VPS:
 
 ```bash
 WEBUI_URL='https://boxedai-contabo.theia-innovation.com'
 OPENCLAW_OPENAI_PROXY='http://opc-proxy:4010'
+OPENID_REDIRECT_URI='https://boxedai-contabo.theia-innovation.com/oauth/oidc/callback'
+WEBUI_AUTH_SIGNOUT_REDIRECT_URL='https://boxedai-contabo.theia-innovation.com/'
 ```
 
 Note:
@@ -113,6 +116,7 @@ Note:
 - `WEBUI_URL` deve riflettere l'URL pubblico reale servito dal gateway
 - `OPENCLAW_OPENAI_PROXY` deve puntare al gateway raggiungibile da Box
 - se Box e gateway sono nella stessa rete Docker, usare nome container/servizio e non host pubblico
+- l'OIDC callback pubblico deve restare sul dominio Box servito dal gateway
 
 ### Reverse proxy esterno della VPS
 
@@ -123,6 +127,7 @@ Se esiste gia un Nginx/Traefik/Caddy di frontiera:
   - HTTP standard
   - WebSocket per `/ws/socket.io/*`
   - richieste upload multipart grandi quanto richiesto
+  - redirect e callback OIDC senza riscritture anomale di host/scheme
 
 Per Caddy, il backend/upstream da configurare sul sito Box e quindi:
 
@@ -130,7 +135,7 @@ Per Caddy, il backend/upstream da configurare sul sito Box e quindi:
 opc-proxy:4010
 ```
 
-non:
+Non:
 
 ```text
 open-webui:8080
@@ -172,6 +177,7 @@ Esito atteso:
 
 - ogni chiamata FE/API passa dal gateway
 - il gateway intercetta `/api/v1/files`, `/api/v1/chats/*`, `/api/chat/completions`
+- la callback OIDC passa dal gateway senza perdere i cookie di sessione
 
 ### Modifica 2. Allineare `BOX_BASE_URL`
 
@@ -208,7 +214,24 @@ Motivo:
 - il frontend Box usa WebSocket per stato e realtime
 - senza pass-through corretto la UI si degrada o fallisce
 
-### Modifica 5. Verificare limite upload del reverse proxy pubblico
+### Modifica 5. Verificare OIDC / Keycloak dietro gateway
+
+Da fare:
+
+- verificare che il login Keycloak chiuda correttamente su Box senza redirect finale a `/auth`
+- verificare che il dominio pubblico Box resti quello visto da Open WebUI nel callback flow
+
+Motivo:
+
+- il gateway oggi preserva `Set-Cookie` multipli e inoltra `Host` / `X-Forwarded-*`
+- questo e necessario per non rompere la ricostruzione della sessione OIDC
+
+Esito atteso:
+
+- callback `GET /oauth/oidc/callback` -> `302` valido
+- sessione Box persistita dopo il login
+
+### Modifica 6. Verificare limite upload del reverse proxy pubblico
 
 Da fare:
 
@@ -223,8 +246,11 @@ Motivo:
 Il punto ancora aperto non e nel gateway ma nel `be`:
 
 - `GET /api/v1/uploads/{upload_id}/links` restituisce ancora `public_url` e `presigned_get_url` con host locale MinIO (`localhost:9000`)
-- il gateway per ora ripiega su `download_url` assolutizzato sul dominio pubblico del `be`
-- la fruibilita reale del documento da parte di OPC dipende quindi da una correzione lato `be`/MinIO exposure
+- il gateway oggi usa in priorita:
+  1. `presigned_get_url`
+  2. `public_url`
+  3. `download_url`
+- il runtime OPC rifiuta `localhost` / reti interne per policy
 
 Tradotto operativamente:
 
@@ -234,9 +260,12 @@ Tradotto operativamente:
 ## Checklist finale pre-rollout
 
 - [ ] il dominio Box pubblico termina sul gateway
+- [ ] Caddy punta a `opc-proxy:4010` e non a `open-webui:8080`
 - [ ] `BOX_BASE_URL` punta a Box interno
 - [ ] `OPENCLAW_OPENAI_PROXY` punta al gateway
+- [ ] `WEBUI_URL` e `OPENID_REDIRECT_URI` riflettono il dominio pubblico Box
 - [ ] WebSocket `/ws/socket.io/*` funzionante
+- [ ] callback OIDC `GET /oauth/oidc/callback` funzionante dietro gateway
 - [ ] upload multipart accettato dal reverse proxy pubblico
 - [ ] `POST /api/v1/files` visibile nei log del gateway
 - [ ] `POST /api/v1/chats/new` visibile nei log del gateway

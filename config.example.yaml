@@ -3,7 +3,7 @@ gateway:
   token: "${OPENCLAW_GATEWAY_TOKEN}" # opzionale se il proxy non chiama il gateway direttamente
 
 backend:
-  base_url: http://127.0.0.1:8000
+  base_url: "${BACKEND_BASE_URL}"
   timeout_seconds: 120
 
 edge:
