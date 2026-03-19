@@ -5,6 +5,7 @@ gateway:
 backend:
   base_url: "${BACKEND_BASE_URL}"
   timeout_seconds: 120
+  streaming_enabled: "${BACKEND_STREAMING_ENABLED}"
 
 edge:
   enabled: false

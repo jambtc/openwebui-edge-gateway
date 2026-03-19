@@ -70,6 +70,10 @@ class BackendConfig(BaseModel):
     timeout_seconds: float = Field(
         default=120, gt=0, le=600, description="Timeout for proxy->BFF calls"
     )
+    streaming_enabled: bool = Field(
+        default=False,
+        description="If true, honor incoming stream=true for chat/completions endpoints",
+    )
 
 
 class EdgeConfig(BaseModel):
@@ -123,6 +127,24 @@ def load_config(config_path: Path) -> AppConfig:
     if "token" in gateway and isinstance(gateway["token"], str):
         gateway["token"] = _expand_env(gateway["token"])
     data["gateway"] = gateway
+
+    backend = data.get("backend", {})
+    if "base_url" in backend and isinstance(backend["base_url"], str):
+        backend["base_url"] = _expand_env(backend["base_url"])
+    elif "base_url" not in backend:
+        env_backend_base_url = os.environ.get("BACKEND_BASE_URL")
+        if env_backend_base_url:
+            backend["base_url"] = env_backend_base_url
+
+    if "streaming_enabled" in backend and isinstance(
+        backend["streaming_enabled"], str
+    ):
+        backend["streaming_enabled"] = _expand_env(backend["streaming_enabled"])
+    elif "streaming_enabled" not in backend:
+        env_backend_streaming_enabled = os.environ.get("BACKEND_STREAMING_ENABLED")
+        if env_backend_streaming_enabled is not None:
+            backend["streaming_enabled"] = env_backend_streaming_enabled
+    data["backend"] = backend
 
     edge = data.get("edge", {})
     if "box_base_url" in edge and isinstance(edge["box_base_url"], str):

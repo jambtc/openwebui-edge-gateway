@@ -67,6 +67,7 @@ Motivi:
 - carica automaticamente `.env`
 - usa `config.yaml` come configurazione runtime del gateway
 - rende parametrico anche il target backend tramite `BACKEND_BASE_URL`
+- abilita o disabilita il vero streaming backend tramite `BACKEND_STREAMING_ENABLED`
 - monta il container `opc-proxy` sulla rete Docker condivisa `tradarb_default`
 - mantiene il wiring coerente con Box locale su `BOX_BASE_URL`
 
@@ -77,6 +78,8 @@ Prerequisiti:
   - `BOX_BASE_URL=http://host.docker.internal:3002`
 - backend locale o VPS raggiungibile all'URL definito in `.env`, oggi:
   - `BACKEND_BASE_URL=http://127.0.0.1:8000`
+- toggle streaming backend definito in `.env`, oggi:
+  - `BACKEND_STREAMING_ENABLED=false`
 
 Avvio:
 
@@ -103,6 +106,7 @@ Nota operativa:
 
 - se Box gira su una porta host diversa, aggiorna `BOX_BASE_URL` nel file `.env` prima del `docker compose up`
 - se il backend non e locale su `127.0.0.1:8000`, aggiorna `BACKEND_BASE_URL` nel file `.env`
+- se vuoi rispettare `stream=true` nelle completion, imposta `BACKEND_STREAMING_ENABLED=true`
 - in VPS, invece di `host.docker.internal:3002`, il valore consigliato per Box resta `http://open-webui:8080`
 
 ## Avvio locale alternativo: venv

@@ -1006,20 +1006,71 @@ async def _forward_openai_json_to_be(
     headers: dict[str, str],
     *,
     require_model: bool,
-    force_non_stream: bool,
+    allow_streaming: bool,
     error_message: str,
-) -> JSONResponse:
+) -> Response:
     _normalize_openai_model(payload, require_model=require_model)
-    if force_non_stream:
+    streaming_requested = (
+        allow_streaming
+        and config.backend.streaming_enabled
+        and bool(payload.get("stream"))
+    )
+    if not streaming_requested:
         payload["stream"] = False
 
     print(
         "proxy→be request "
         f"path={path} "
+        f"stream={bool(payload.get('stream'))} "
         f"headers={_json_for_log(headers)} "
         f"messages={_messages_for_log(payload.get('messages'))}",
         flush=True,
     )
+
+    if streaming_requested:
+        try:
+            client, be_response = await backend_client.stream_json(
+                path=path,
+                payload=payload,
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"message": error_message, "error": str(exc)},
+            ) from exc
+
+        content_type = be_response.headers.get("content-type", "")
+        if be_response.status_code >= 400 or "text/event-stream" not in content_type:
+            raw = await be_response.aread()
+            try:
+                be_payload = json.loads(raw.decode("utf-8"))
+            except Exception:
+                be_payload = {"raw_response": raw.decode("utf-8", errors="replace")}
+            await be_response.aclose()
+            await client.aclose()
+            return JSONResponse(status_code=be_response.status_code, content=be_payload)
+
+        response_headers: dict[str, str] = {}
+        for name, value in be_response.headers.items():
+            lower = name.lower()
+            if lower in HOP_BY_HOP_HEADERS or lower == "content-length":
+                continue
+            response_headers[name] = value
+
+        async def stream_body() -> Any:
+            try:
+                async for chunk in be_response.aiter_bytes():
+                    yield chunk
+            finally:
+                await be_response.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            stream_body(),
+            status_code=be_response.status_code,
+            headers=response_headers,
+        )
 
     try:
         be_response = await backend_client.post_json(
@@ -1100,7 +1151,7 @@ async def chat_completions(request: Request):
         payload=body,
         headers=headers,
         require_model=True,
-        force_non_stream=True,
+        allow_streaming=True,
         error_message="Failed forwarding chat completion to BE",
     )
 
@@ -1130,7 +1181,7 @@ async def completions(request: Request):
         payload=body,
         headers=headers,
         require_model=True,
-        force_non_stream=True,
+        allow_streaming=True,
         error_message="Failed forwarding completion to BE",
     )
 
