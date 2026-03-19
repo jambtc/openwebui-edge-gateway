@@ -299,6 +299,10 @@ def _normalize_openai_model(
         return
 
     if model_id.startswith("openclaw:") or model_id.startswith("agent:"):
+        prefix, agent_key = model_id.split(":", 1)
+        mapped_agent = _resolve_agent(agent_key)
+        if mapped_agent is not None:
+            payload["model"] = f"openclaw:{mapped_agent.agent_id}"
         return
 
     if model_id == "openclaw" and EDGE_DYNAMIC_DEFAULT_MODEL_ID:
