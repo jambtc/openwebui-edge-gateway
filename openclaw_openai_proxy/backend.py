@@ -36,6 +36,30 @@ class BackendClient:
 
         return await asyncio.to_thread(_post_sync)
 
+    async def stream_json(
+        self,
+        path: str,
+        payload: dict,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[httpx.AsyncClient, httpx.Response]:
+        target_url = f"{self.base_url}{path}"
+        resolved_headers = dict(headers or {})
+        timeout = httpx.Timeout(self._timeout, read=None)
+        client = httpx.AsyncClient(timeout=timeout)
+
+        try:
+            request = client.build_request(
+                "POST",
+                target_url,
+                json=payload,
+                headers=resolved_headers,
+            )
+            response = await client.send(request, stream=True)
+            return client, response
+        except Exception:
+            await client.aclose()
+            raise
+
     async def get(
         self,
         path: str,
