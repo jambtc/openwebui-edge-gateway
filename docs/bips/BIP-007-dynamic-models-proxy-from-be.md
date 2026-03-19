@@ -161,3 +161,11 @@ Questa separazione e coerente con il ruolo attuale del progetto come edge gatewa
 - La normalizzazione del campo `model` non fallisce piu sui model id dinamici non presenti in `config.agents`: se il model id non e prefissato ma non corrisponde a un alias statico locale, passa through invariato verso il `be`.
 - Gli alias statici esistenti in YAML continuano a funzionare come compatibilita retroattiva.
 - Restano da validare in runtime VPS: shape modelli restituita dal `be`, comportamento Box in UI, e conferma che il reinject documentale provider-side torna a comparire nei log quando Box punta di nuovo al gateway.
+
+### 2026-03-19 - Diagnosi runtime VPS
+
+- Verificato che `GET /v1/models` del gateway restituisce correttamente i model id del `be` e nasconde l'alias generico `openclaw` quando e presente un model esplicito.
+- Verificato che il gateway deve lasciare invariati i model id gia prefissati (`openclaw:*`, `agent:*`): il remap di compatibilita via YAML sui model prefissati e stato rimosso perche reintroduceva una dipendenza statica non coerente con il nuovo scope.
+- Eseguito test diretto contro `be /v1/chat/completions` con `model: openclaw:main`: stesso errore `500 internal error` osservato passando dal gateway.
+- Isolata quindi la causa reale del blocco chat: errore upstream OpenClaw/OpenAI, non regressione del gateway. Dai log OpenClaw il run fallisce per `rate_limit` sui modelli OpenAI usati dall'agente (`gpt-4.1`, `gpt-5.1-codex`).
+- Conclusione: il gateway puo restare allineato al contratto del `be` senza reinterpretare i model id prefissati; il blocco operativo residuo e esterno al gateway.
